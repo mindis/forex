@@ -83,15 +83,15 @@ def model():
 * アテンションプーリングを備えた畳み込みニューラルネットワーク
 * フィルターサイズ（受容野）の大きさが精度に関係する
 * ローカルプーリングは 特徴を失わせる
-* 拡張畳み込みだから,diration_rateを使用する？
+* 拡張畳み込みだから,dilation_rateを使用する？
 
 def model():
     inputs = layers.Input((num_nits,1))
 
     cnn = layers.Conv1D(num_nits,2,padding="causal",activation="relu")(inputs)
-    cnn = layers.Conv1D(num_nits*2,2,padding="causal",activation="relu",diration_rate=2)(cnn)
-    cnn = layers.Conv1D(num_nits*4,2,padding="causal",activation="relu",diration_rate=4)(cnn)
-    cnn  = layers.Conv1D(num_nits*8,2,padding="causal",activation="relu",diration_rate=8)(cnn)
+    cnn = layers.Conv1D(num_nits*2,2,padding="causal",activation="relu",dilation_rate=2)(cnn)
+    cnn = layers.Conv1D(num_nits*4,2,padding="causal",activation="relu",dilation_rate=4)(cnn)
+    cnn  = layers.Conv1D(num_nits*8,2,padding="causal",activation="relu",dilation_rate=8)(cnn)
 
     pool1 = layers.Conv1D(10,2,padding="same",activation="relu")(cnn)
 
@@ -115,7 +115,6 @@ def model():
 * 関連する機能を取り込むには、5のフィルタ長が有用で十分
 
 * 転送学習は精度がゼロの状態からトレーニングするよりも精度が優れている
-* Elementwise Addition == layers.Add ?
 
 def model():
     def block(inputs,type=1):
@@ -156,3 +155,82 @@ def model():
     return model
 
 
+
+
+#####################################################################################
+* 変化が小さい場合、より小さなdilation_rateは微妙は変化をとらえることができる、逆も同じ
+* 異なるdilation_rateを使用する。(並列)
+*  グローバル規模で情報を取得するために、大きなカーネルでいくつかの連続した畳み込みを使用します
+#####################################################################################
+
+* 同じ受容野を持つ畳み込みカーネルと比較すると、
+        「拡張畳み込みはより小さなカーネルサイズで、パーラメータを減らし、受容野を広げ、ほぼ同じ情報量を経ることができる。」
+* カーネルの数が大きい程より多くの情報を抽出することができる。（畳み込みカーネル ＝ フィルターサイズ）
+* 残接続を用いて 、情報や勾配損失に対処する。
+* 拡張畳込みにもとずく、「GRL」と「LRL」を定義しそれらの両方を統合する。（より良い再構築のために豊富な特徴マップを維持するために統合されています。）
+        GRL（グローバル残差学習） ・・・ 初期情報を利用する
+        LRL（ローカル残差学習） ・・・ 情報の流れをさらに改善する
+
+def model():
+
+    def grl(inputs):
+        bn = layers.BatchNormalization()(inputs)
+        cnn = layers.Conv1D(32,9,padding="same",activation="relu",dilation_rate=1)(bn)
+        cnn = layers.Conv1D(64,3,padding="same",activation="relu",dilation_rate=2)(cnn)
+        cnn = layers.Conv1D(32,3,padding="same",activation="relu",dilation_rate=3)(cnn)
+        cnn = layers.Conv1D(64,3,padding="same",activation="relu",dilation_rate=2)(cnn)
+        cnn = layers.Conv1D(32,3,padding="same",activation="reli",dilation_rate=3)(cnn)
+        cnn = layers.conv1D(64,3,padding="same",activation="relu",dilation_rate=2)(cnn)
+        bn2 = layers.BatchNormalization()(cnn)
+        cnn = layers.Conv1D(32,3,padding="same",activation="relu",dilation_rate=3)(bn2)
+        bn3 = layers.BatchNormalization()(cnn)
+
+        concat = layers.Concatenate()([bn,bn2,bn3])
+        cnn = layers.Conv1D(64,3,padding="same",activation="relu",dilation_rate=2)(concat)
+        concat = layers.Concatenate()([inputs,cnn])
+
+        return concat
+
+    def lrl(inputs):
+        bn = layers.BatchNormalization()(inputs)
+        cnn = layers.Conv1D(32,9,padding="same",activation="relu")(bn)
+
+        cnn2 = layers.Conv1D(64,3,padding="same",activation="relu",dilation_rate=2)(cnn)
+
+        cnn3 = layers.Conv1D(32,3,padding="same",activation="relu",dilation_rate=3)(cnn2)
+        concat = layers.Concatenate()([cnn3,cnn])
+
+        cnn4 = layers.Conv1D(64, 3, padding="same", activation="relu", dilation_rate=2)(concat)
+        concat2 = layers.Conv1D(cnn2, cnn4])
+
+        cnn5 = layers.Conv1D(32,3,padding="same",activation="relu",dilation_rate=3)(concat2)
+        concat3 = layers.Concatenate()([concat,cnn5])
+
+        cnn6 = layers.Conv1D(62,3,padding="same",activation="relu",,dilation_rate=2)(concat3)
+        bn2 =  layers.BatchNormalization()(cnn6)
+        concat = layers.Concatenate()([concat2,bn2])
+
+        cnn7 = layers.Conv1D(32,3,padding="same",activation="relu",dilation_rate=3)(concat)
+        bn3 = layers.BatchNormalization()(cnn7)
+        concat = layers.Concatenate()([concat3,bn3])
+
+        concat = layers.Concatenate()([concat,bn,bn2])
+
+        return concat
+
+    inputs = layers.Input((num_nits,1))
+
+    grl = grl(inputs)
+    lrl = lrl(inputs)
+
+    concat = layers.Concatenate()([grl,lrl])
+
+    cnn = layers.Conv1D(32,3,padding="same",activation="relu")(concat)
+
+    flatten = layers.Flatten()(cnn)
+
+    outputs = layerws.Dense(1)(flatten)
+
+    model = tf.keras.Model(inputs,outputs)
+
+    return model
